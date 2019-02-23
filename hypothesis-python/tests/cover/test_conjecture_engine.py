@@ -1558,3 +1558,26 @@ def test_block_programs_are_adaptive():
 
     assert len(shrinker.shrink_target.buffer) == 1
     assert shrinker.calls <= 60
+
+
+def test_stable_identifiers_match_their_examples():
+    def tree(data):
+        data.start_example(1)
+        n = data.draw_bits(1)
+        label = data.draw_bits(8)
+        if n:
+            tree(data)
+            tree(data)
+        data.stop_example(1)
+        return label
+
+    initial = hbytes([1, 10, 0, 0, 1, 0, 0, 10, 0, 0])
+
+    @shrinking_from(initial)
+    def shrinker(data):
+        tree(data)
+        data.mark_interesting()
+
+    for ex in shrinker.examples:
+        id = shrinker.stable_identifier_for_example(ex)
+        assert shrinker.example_for_stable_identifier(id) is ex
