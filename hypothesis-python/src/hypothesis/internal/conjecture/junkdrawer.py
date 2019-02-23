@@ -42,3 +42,17 @@ def replace_all(buffer, replacements):
     result.extend(buffer[prev:])
     assert len(result) == len(buffer) + offset
     return hbytes(result)
+
+
+def pop_random(random, values):
+    """Remove a random element of values, possibly changing the ordering of its
+    elements."""
+
+    # We pick the element at a random index. Rather than removing that element
+    # from the list (which would be an O(n) operation), we swap it to the end
+    # and return the last element of the list. This changes the order of
+    # the elements, but as long as these elements are only accessed through
+    # random sampling that doesn't matter.
+    i = random.randrange(0, len(values))
+    values[i], values[-1] = values[-1], values[i]
+    return values.pop()
