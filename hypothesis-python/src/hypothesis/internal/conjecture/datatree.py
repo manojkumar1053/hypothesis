@@ -33,7 +33,7 @@ class PreviouslyUnseenBehaviour(HypothesisException):
     pass
 
 
-def inconsistent_generation(self):
+def inconsistent_generation():
     raise Flaky(
         "Inconsistent data generation! Data generation behaved differently "
         "between different runs. Is your data generation depending on external "
@@ -171,7 +171,14 @@ class DataTree(object):
     def generate_novel_prefix(self, random):
         """Generate a short random string that (after rewriting) is not
         a prefix of any buffer previously added to the tree."""
-        return hbytes()
+        assert not self.is_exhausted
+
+        while True:
+            data = ConjectureData.for_random(random, max_length=float("inf"))
+            try:
+                self.simulate_test_function(data)
+            except PreviouslyUnseenBehaviour:
+                return hbytes(data.buffer)
 
     def rewrite(self, buffer):
         """Use previously seen ConjectureData objects to return a tuple of

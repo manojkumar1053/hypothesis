@@ -32,6 +32,7 @@ from hypothesis.internal.compat import (
     text_type,
     unicode_safe_repr,
 )
+from hypothesis.internal.conjecture.junkdrawer import uniform
 from hypothesis.internal.conjecture.utils import calc_label_from_name
 from hypothesis.internal.escalation import mark_for_escalation
 from hypothesis.utils.conventions import UniqueIdentifier
@@ -302,6 +303,14 @@ class ConjectureData(object):
         return ConjectureData(
             max_length=len(buffer),
             draw_bytes=lambda data, n: hbytes(buffer[data.index : data.index + n]),
+            observer=observer,
+        )
+
+    @classmethod
+    def for_random(self, random, max_length, observer=None):
+        return ConjectureData(
+            max_length=max_length,
+            draw_bytes=lambda data, n: uniform(random, n),
             observer=observer,
         )
 

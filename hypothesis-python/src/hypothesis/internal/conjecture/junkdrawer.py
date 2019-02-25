@@ -22,7 +22,7 @@ anything that lives here, please move it."""
 
 from __future__ import absolute_import, division, print_function
 
-from hypothesis.internal.compat import hbytes
+from hypothesis.internal.compat import hbytes, int_to_bytes
 
 
 def replace_all(buffer, replacements):
@@ -42,3 +42,9 @@ def replace_all(buffer, replacements):
     result.extend(buffer[prev:])
     assert len(result) == len(buffer) + offset
     return hbytes(result)
+
+
+def uniform(random, n):
+    """Returns a uniformly distributed random byte string
+    of length ``n``."""
+    return int_to_bytes(random.getrandbits(n * 8), n)
