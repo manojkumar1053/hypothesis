@@ -21,7 +21,12 @@ import attr
 
 from hypothesis.errors import Flaky, HypothesisException
 from hypothesis.internal.compat import hbytes, hrange
-from hypothesis.internal.conjecture.data import DataObserver, Status, StopTest, ConjectureData
+from hypothesis.internal.conjecture.data import (
+    ConjectureData,
+    DataObserver,
+    Status,
+    StopTest,
+)
 
 
 class PreviouslyUnseenBehaviour(HypothesisException):
@@ -39,7 +44,27 @@ def inconsistent_generation(self):
 EMPTY = frozenset()
 
 
-@attr.s()
+@attr.s(slots=True)
+class Branch(object):
+    bits = attr.ib()
+    children = attr.ib()
+
+
+@attr.s(slots=True, frozen=True)
+class Conclusion(object):
+    status = attr.ib()
+    interesting_origin = attr.ib()
+
+
+CONCLUSIONS = {}
+
+
+def conclusion(status, interesting_origin):
+    result = Conclusion(status, interesting_origin)
+    return CONCLUSIONS.setdefault(result, result)
+
+
+@attr.s(slots=True)
 class TreeNode(object):
     """Node in a tree that corresponds to previous interactions with
     a ``ConjectureData`` object according to some fixed test function.
@@ -70,6 +95,8 @@ class TreeNode(object):
     # what's supposed to be here yet.
     transition = attr.ib(default=None)
 
+    exhausted = attr.ib(default=False, init=False)
+
     @property
     def forced(self):
         if not self.__forced:
@@ -88,6 +115,9 @@ class TreeNode(object):
         a decision at the ``draw_bits`` call corresponding
         to position ``i``, or raises ``Flaky`` if that was
         meant to be a forced node."""
+
+        assert not self.exhausted
+
         if i in self.forced:
             inconsistent_generation()
 
@@ -98,14 +128,13 @@ class TreeNode(object):
             values=self.values[i + 1 :],
             transition=self.transition,
         )
-        self.transition = {key: child}
+        self.transition = Branch(bits=self.bits[i], children={key: child})
         if self.__forced is not None:
-            child.__forced = {j - i - 1 for j in self.__forced if j > i},
+            child.__forced = ({j - i - 1 for j in self.__forced if j > i},)
             self.__forced = {j for j in self.__forced if j < i}
         del self.values[i:]
-        del self.bits[i + 1 :]
-        assert len(self.values) == i
-        assert len(self.bits) == i + 1
+        del self.bits[i:]
+        assert len(self.values) == len(self.bits) == i
 
 
 class DataTree(object):
@@ -149,18 +178,20 @@ class DataTree(object):
         try:
             while True:
                 for i, (n_bits, previous) in enumerate(zip(node.bits, node.values)):
-                    v = data.draw_bits(n_bits, forced=node.values[i] if i in node.forced else None)
+                    v = data.draw_bits(
+                        n_bits, forced=node.values[i] if i in node.forced else None
+                    )
                     if v != previous:
                         raise PreviouslyUnseenBehaviour()
-                if isinstance(node.transition, Status):
-                    data.conclude_test(node.transition)
+                if isinstance(node.transition, Conclusion):
+                    t = node.transition
+                    data.conclude_test(t.status, t.interesting_origin)
                 elif node.transition is None:
                     raise PreviouslyUnseenBehaviour()
                 else:
-                    assert len(node.bits) == len(node.values) + 1
-                    v = data.draw_bits(node.bits[-1])
+                    v = data.draw_bits(node.transition.bits)
                     try:
-                        node = node.transition[v]
+                        node = node.transition.children[v]
                     except KeyError:
                         raise PreviouslyUnseenBehaviour()
         except StopTest:
@@ -185,19 +216,17 @@ class TreeRecordingObserver(DataObserver):
         self.__tree = tree
         self.__current_node = tree.root
         self.__index_in_current_node = 0
+        self.__trail = [self.__current_node]
 
     def draw_bits(self, n_bits, forced, value):
+
         i = self.__index_in_current_node
         self.__index_in_current_node += 1
         node = self.__current_node
+        assert len(node.bits) == len(node.values)
         if i < len(node.bits):
             if n_bits != node.bits[i]:
                 inconsistent_generation()
-        else:
-            assert node.transition is None
-            node.bits.append(n_bits)
-        assert i < len(node.bits)
-        if i < len(node.values):
             # Note that we don't check whether a previously
             # forced value is now free. That will be caught
             # if we ever split the node there, but otherwise
@@ -206,30 +235,35 @@ class TreeRecordingObserver(DataObserver):
             # draw and that's a pretty niche failure mode.
             if forced and i not in node.forced:
                 inconsistent_generation()
-
             if value != node.values[i]:
                 node.split_at(i)
                 assert i == len(node.values)
                 new_node = TreeNode()
-                node.transition[value] = new_node
+                branch = node.transition
+                branch.children[value] = new_node
                 self.__current_node = new_node
                 self.__index_in_current_node = 0
-        elif node.transition is None:
-            node.values.append(value)
-            if forced:
-                node.mark_forced(i)
         else:
-            try:
-                self.__current_node = node.transition[value]
-            except KeyError:
-                self.__current_node = node.transition.setdefault(value, TreeNode())
-            except TypeError:
-                assert (
-                    isinstance(node.transition, Status)
-                    and node.transition != Status.OVERRUN
-                )
+            trans = node.transition
+            if trans is None:
+                node.bits.append(n_bits)
+                node.values.append(value)
+                if forced:
+                    node.mark_forced(i)
+            elif isinstance(trans, Conclusion):
+                assert trans.status != Status.OVERRUN
+                # We tried to draw where history says we should have
+                # stopped
                 inconsistent_generation()
-            self.__index_in_current_node = 0
+            else:
+                assert isinstance(trans, Branch)
+                if n_bits != trans.bits:
+                    inconsistent_generation()
+                try:
+                    self.__current_node = trans.children[value]
+                except KeyError:
+                    self.__current_node = trans.children.setdefault(value, TreeNode())
+                self.__index_in_current_node = 0
 
     def conclude_test(self, status, interesting_origin):
         """Says that ``status`` occurred at node ``node``. This updates the
@@ -239,14 +273,15 @@ class TreeRecordingObserver(DataObserver):
         i = self.__index_in_current_node
         node = self.__current_node
 
-        if i < len(node.values) or isinstance(node.transition, dict):
+        if i < len(node.values) or isinstance(node.transition, Branch):
             inconsistent_generation()
 
-        if node.transition is not None:
-            if node.transition != status:
-                raise Flaky(
-                    "Inconsistent test results! Test case was %s on first run but %s on second"
-                    % (existing.status.name, status)
-                )
+        new_transition = conclusion(status, interesting_origin)
+
+        if node.transition is not None and node.transition != new_transition:
+            raise Flaky(
+                "Inconsistent test results! Test case was %r on first run but %r on second"
+                % (node.transition, new_transition)
+            )
         else:
-            node.transition = status
+            node.transition = new_transition

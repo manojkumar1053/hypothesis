@@ -151,7 +151,7 @@ def test_stores_the_tree_flat_until_needed():
     root = runner.tree.root
     assert len(root.bits) == 10
     assert len(root.values) == 10
-    assert root.transition == Status.INTERESTING
+    assert root.transition.status == Status.INTERESTING
 
 
 def test_split_in_the_middle():
@@ -165,8 +165,8 @@ def test_split_in_the_middle():
     root = runner.tree.root
     assert len(root.bits) == 2
     assert len(root.values) == 1
-    assert list(root.transition[0].values) == [2]
-    assert list(root.transition[1].values) == [3]
+    assert list(root.transition.children[0].values) == [2]
+    assert list(root.transition.children[1].values) == [3]
 
 
 def test_stores_forced_nodes():
@@ -189,5 +189,5 @@ def test_correctly_relocates_forced_nodes():
         data.mark_interesting()
 
     root = runner.tree.root
-    assert root.transition[1].forced == {0}
-    assert root.transition[0].forced == {0}
+    assert root.transition.children[1].forced == {0}
+    assert root.transition.children[0].forced == {0}
