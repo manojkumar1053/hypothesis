@@ -20,7 +20,7 @@ from __future__ import absolute_import, division, print_function
 from random import Random
 
 from hypothesis import HealthCheck, settings
-from hypothesis.internal.compat import hbytes
+from hypothesis.internal.compat import hbytes, hrange
 from hypothesis.internal.conjecture.data import ConjectureData, Status
 from hypothesis.internal.conjecture.engine import ConjectureRunner, RunIsComplete
 
@@ -141,6 +141,19 @@ def test_overruns_if_prefix():
     assert runner.tree.rewrite(b"\0")[1] == Status.OVERRUN
 
 
+def test_stores_the_tree_flat_until_needed():
+    @runner_for(hbytes(10))
+    def runner(data):
+        for _ in hrange(10):
+            data.draw_bits(1)
+        data.mark_interesting()
+
+    root = runner.tree.root
+    assert len(root.bits) == 10
+    assert len(root.values) == 10
+    assert root.transition == Status.INTERESTING
+
+
 def test_split_in_the_middle():
     @runner_for([0, 0, 2], [0, 1, 3])
     def runner(data):
@@ -154,3 +167,27 @@ def test_split_in_the_middle():
     assert len(root.values) == 1
     assert list(root.transition[0].values) == [2]
     assert list(root.transition[1].values) == [3]
+
+
+def test_stores_forced_nodes():
+    @runner_for(hbytes(3))
+    def runner(data):
+        data.draw_bits(1, forced=0)
+        data.draw_bits(1)
+        data.draw_bits(1, forced=0)
+        data.mark_interesting()
+
+    root = runner.tree.root
+    assert root.forced == {0, 2}
+
+
+def test_correctly_relocates_forced_nodes():
+    @runner_for([0, 0], [1, 0])
+    def runner(data):
+        data.draw_bits(1)
+        data.draw_bits(1, forced=0)
+        data.mark_interesting()
+
+    root = runner.tree.root
+    assert root.transition[1].forced == {0}
+    assert root.transition[0].forced == {0}

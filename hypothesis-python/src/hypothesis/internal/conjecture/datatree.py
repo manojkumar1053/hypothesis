@@ -24,17 +24,34 @@ from hypothesis.internal.compat import hbytes, hrange
 from hypothesis.internal.conjecture.data import DataObserver, Status
 
 
+def inconsistent_generation(self):
+    raise Flaky(
+        "Inconsistent data generation! Data generation behaved differently "
+        "between different runs. Is your data generation depending on external "
+        "state?"
+    )
+
+
 @attr.s()
 class TreeNode(object):
     bits = attr.ib(default=attr.Factory(list))
     values = attr.ib(default=attr.Factory(list))
     transition = attr.ib(default=None)
+    forced = attr.ib(default=attr.Factory(set))
 
     def split_at(self, i):
+        """Splits the tree so that it can incorporate
+        a decision at the ``draw_bits`` call corresponding
+        to position ``i``, or raises ``Flaky`` if that was
+        meant to be a forced node."""
+        if i in self.forced:
+            inconsistent_generation()
+
         child = TreeNode(
             bits=self.bits[i + 1 :],
             values=self.values[i + 1 :],
             transition=self.transition,
+            forced={j - i - 1 for j in self.forced if j > i},
         )
         key = self.values[i]
         del self.values[i:]
@@ -42,6 +59,7 @@ class TreeNode(object):
         assert len(self.values) == i
         assert len(self.bits) == i + 1
         self.transition = {key: child}
+        self.forced = {j for j in self.forced if j < i}
 
 
 class DataTree(object):
@@ -97,15 +115,23 @@ class TreeRecordingObserver(DataObserver):
         i = self.__index_in_current_node
         self.__index_in_current_node += 1
         node = self.__current_node
-
         if i < len(node.bits):
             if n_bits != node.bits[i]:
-                self.__inconsistent_generation()
+                inconsistent_generation()
         else:
             assert node.transition is None
             node.bits.append(n_bits)
         assert i < len(node.bits)
         if i < len(node.values):
+            # Note that we don't check whether a previously
+            # forced value is now free. That will be caught
+            # if we ever split the node there, but otherwise
+            # may pass silently. This is acceptable because it
+            # means we skip a hash set lookup on every
+            # draw and that's a pretty niche failure mode.
+            if forced and i not in node.forced:
+                inconsistent_generation()
+
             if value != node.values[i]:
                 node.split_at(i)
                 assert i == len(node.values)
@@ -114,6 +140,8 @@ class TreeRecordingObserver(DataObserver):
                 self.__current_node = new_node
                 self.__index_in_current_node = 0
         elif node.transition is None:
+            if forced:
+                node.forced.add(i)
             node.values.append(value)
         else:
             try:
@@ -125,15 +153,8 @@ class TreeRecordingObserver(DataObserver):
                     isinstance(node.transition, Status)
                     and node.transition != Status.OVERRUN
                 )
-                self.__inconsistent_generation()
+                inconsistent_generation()
             self.__index_in_current_node = 0
-
-    def __inconsistent_generation(self):
-        raise Flaky(
-            "Inconsistent data generation! Data generation behaved differently "
-            "between different runs. Is your data generation depending on external "
-            "state?"
-        )
 
     def conclude_test(self, status, interesting_origin):
         """Says that ``status`` occurred at node ``node``. This updates the
@@ -144,7 +165,7 @@ class TreeRecordingObserver(DataObserver):
         node = self.__current_node
 
         if i < len(node.values) or isinstance(node.transition, dict):
-            self.__inconsistent_generation()
+            inconsistent_generation()
 
         if node.transition is not None:
             if node.transition != status:
