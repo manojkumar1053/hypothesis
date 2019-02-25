@@ -21,12 +21,7 @@ import attr
 
 from hypothesis.errors import Flaky, HypothesisException
 from hypothesis.internal.compat import hbytes, hrange
-from hypothesis.internal.conjecture.data import (
-    ConjectureData,
-    DataObserver,
-    Status,
-    StopTest,
-)
+from hypothesis.internal.conjecture.data import DataObserver, Status, StopTest, ConjectureData
 
 
 class PreviouslyUnseenBehaviour(HypothesisException):
@@ -41,12 +36,52 @@ def inconsistent_generation(self):
     )
 
 
+EMPTY = frozenset()
+
+
 @attr.s()
 class TreeNode(object):
+    """Node in a tree that corresponds to previous interactions with
+    a ``ConjectureData`` object according to some fixed test function.
+
+    This is functionally a variant patricia trie.
+    See https://en.wikipedia.org/wiki/Radix_tree for the general idea,
+    but what this means in particular here is that we have a very deep
+    but very lightly branching tree and rather than store this as a fully
+    recursive structure we flatten prefixes and long branches into
+    lists. This significantly compacts the storage requirements.
+    """
+
+    # Records the previously drawn bits and their
+    # corresponding values. Either len(bits) == len(values)
+    # or len(bits) == len(values) + 1 and the last bit call
+    # corresponds to the transition to a child node.
     bits = attr.ib(default=attr.Factory(list))
     values = attr.ib(default=attr.Factory(list))
+
+    # The indices of values in the draw list which
+    # were forced. None if no indices have been forced,
+    # purely for space saving reasons (we force quite rarely).
+    __forced = attr.ib(default=None, init=False)
+
+    # Either a dict whose keys are values drawn from
+    # bits[-1], or a Status object indicating the test
+    # finishes here, or None indicating we don't know
+    # what's supposed to be here yet.
     transition = attr.ib(default=None)
-    forced = attr.ib(default=attr.Factory(set))
+
+    @property
+    def forced(self):
+        if not self.__forced:
+            return EMPTY
+        return self.__forced
+
+    def mark_forced(self, i):
+        """Note that the value at index ``i`` was forced."""
+        assert 0 <= i < len(self.values)
+        if self.__forced is None:
+            self.__forced = set()
+        self.__forced.add(i)
 
     def split_at(self, i):
         """Splits the tree so that it can incorporate
@@ -56,19 +91,21 @@ class TreeNode(object):
         if i in self.forced:
             inconsistent_generation()
 
+        key = self.values[i]
+
         child = TreeNode(
             bits=self.bits[i + 1 :],
             values=self.values[i + 1 :],
             transition=self.transition,
-            forced={j - i - 1 for j in self.forced if j > i},
         )
-        key = self.values[i]
+        self.transition = {key: child}
+        if self.__forced is not None:
+            child.__forced = {j - i - 1 for j in self.__forced if j > i},
+            self.__forced = {j for j in self.__forced if j < i}
         del self.values[i:]
         del self.bits[i + 1 :]
         assert len(self.values) == i
         assert len(self.bits) == i + 1
-        self.transition = {key: child}
-        self.forced = {j for j in self.forced if j < i}
 
 
 class DataTree(object):
@@ -112,9 +149,7 @@ class DataTree(object):
         try:
             while True:
                 for i, (n_bits, previous) in enumerate(zip(node.bits, node.values)):
-                    v = data.draw_bits(
-                        n_bits, forced=node.values[i] if i in node.forced else None
-                    )
+                    v = data.draw_bits(n_bits, forced=node.values[i] if i in node.forced else None)
                     if v != previous:
                         raise PreviouslyUnseenBehaviour()
                 if isinstance(node.transition, Status):
@@ -180,9 +215,9 @@ class TreeRecordingObserver(DataObserver):
                 self.__current_node = new_node
                 self.__index_in_current_node = 0
         elif node.transition is None:
-            if forced:
-                node.forced.add(i)
             node.values.append(value)
+            if forced:
+                node.mark_forced(i)
         else:
             try:
                 self.__current_node = node.transition[value]
