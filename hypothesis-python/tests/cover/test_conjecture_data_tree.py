@@ -35,13 +35,11 @@ def runner_for(*examples):
 
     def accept(tf):
         runner = ConjectureRunner(tf, settings=TEST_SETTINGS, random=Random(0))
+        runner.exit_with = lambda reason: None
         ran_examples = []
         for e in examples:
             e = hbytes(e)
-            try:
-                data = runner.cached_test_function(e)
-            except RunIsComplete:
-                pass
+            data = runner.cached_test_function(e)
             ran_examples.append((e, data))
         for e, d in ran_examples:
             rewritten, status = runner.tree.rewrite(e)
@@ -163,8 +161,7 @@ def test_split_in_the_middle():
         data.mark_interesting()
 
     root = runner.tree.root
-    assert len(root.bits) == 2
-    assert len(root.values) == 1
+    assert len(root.bits) == len(root.values) == 1
     assert list(root.transition.children[0].values) == [2]
     assert list(root.transition.children[1].values) == [3]
 

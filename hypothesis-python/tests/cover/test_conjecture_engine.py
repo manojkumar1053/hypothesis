@@ -1395,6 +1395,24 @@ def test_target_selector_will_eventually_reuse_examples():
         assert x.global_identifier in seen
 
 
+def test_cached_test_function_returns_right_value():
+    count = [0]
+
+    def tf(data):
+        count[0] += 1
+        data.draw_bits(2)
+        data.mark_interesting()
+
+    with deterministic_PRNG():
+        runner = ConjectureRunner(tf, settings=TEST_SETTINGS)
+        for _ in hrange(2):
+            for b in (b"\0", b"\1"):
+                d = runner.cached_test_function(b)
+                assert d.status == Status.INTERESTING
+                assert d.buffer == b
+        assert count[0] == 2
+
+
 def test_cached_test_function_does_not_reinvoke_on_prefix():
     call_count = [0]
 
