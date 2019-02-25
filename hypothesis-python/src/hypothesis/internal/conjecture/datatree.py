@@ -17,8 +17,31 @@
 
 from __future__ import absolute_import, division, print_function
 
+import attr
+
+from hypothesis.errors import Flaky
 from hypothesis.internal.compat import hbytes, hrange
 from hypothesis.internal.conjecture.data import DataObserver, Status
+
+
+@attr.s()
+class TreeNode(object):
+    bits = attr.ib(default=attr.Factory(list))
+    values = attr.ib(default=attr.Factory(list))
+    transition = attr.ib(default=None)
+
+    def split_at(self, i):
+        child = TreeNode(
+            bits=self.bits[i + 1 :],
+            values=self.values[i + 1 :],
+            transition=self.transition,
+        )
+        key = self.values[i]
+        del self.values[i:]
+        del self.bits[i + 1 :]
+        assert len(self.values) == i
+        assert len(self.bits) == i + 1
+        self.transition = {key: child}
 
 
 class DataTree(object):
@@ -27,6 +50,7 @@ class DataTree(object):
 
     def __init__(self, cap):
         self.cap = cap
+        self.root = TreeNode()
 
     @property
     def is_exhausted(self):
@@ -46,8 +70,11 @@ class DataTree(object):
         from the existing values it will be None."""
         return (buffer, None)
 
+    def simulate_test_function(self, data):
+        pass
+
     def new_observer(self):
-        return DataObserver()
+        return TreeRecordingObserver(self)
 
 
 def _is_simple_mask(mask):
@@ -63,9 +90,67 @@ def _is_simple_mask(mask):
 class TreeRecordingObserver(DataObserver):
     def __init__(self, tree):
         self.__tree = tree
+        self.__current_node = tree.root
+        self.__index_in_current_node = 0
 
-    def init(self, data):
-        self.__data = data
+    def draw_bits(self, n_bits, forced, value):
+        i = self.__index_in_current_node
+        self.__index_in_current_node += 1
+        node = self.__current_node
+
+        if i < len(node.bits):
+            if n_bits != node.bits[i]:
+                self.__inconsistent_generation()
+        else:
+            assert node.transition is None
+            node.bits.append(n_bits)
+        assert i < len(node.bits)
+        if i < len(node.values):
+            if value != node.values[i]:
+                node.split_at(i)
+                assert i == len(node.values)
+                new_node = TreeNode()
+                node.transition[value] = new_node
+                self.__current_node = new_node
+                self.__index_in_current_node = 0
+        elif node.transition is None:
+            node.values.append(value)
+        else:
+            try:
+                self.__current_node = node.transition[value]
+            except KeyError:
+                self.__current_node = node.transition.setdefault(value, TreeNode())
+            except TypeError:
+                assert (
+                    isinstance(node.transition, Status)
+                    and node.transition != Status.OVERRUN
+                )
+                self.__inconsistent_generation()
+            self.__index_in_current_node = 0
+
+    def __inconsistent_generation(self):
+        raise Flaky(
+            "Inconsistent data generation! Data generation behaved differently "
+            "between different runs. Is your data generation depending on external "
+            "state?"
+        )
 
     def conclude_test(self, status, interesting_origin):
-        self.__tree.add(self.__data)
+        """Says that ``status`` occurred at node ``node``. This updates the
+        node if necessary and checks for consistency."""
+        if status == Status.OVERRUN:
+            return
+        i = self.__index_in_current_node
+        node = self.__current_node
+
+        if i < len(node.values) or isinstance(node.transition, dict):
+            self.__inconsistent_generation()
+
+        if node.transition is not None:
+            if node.transition != status:
+                raise Flaky(
+                    "Inconsistent test results! Test case was %s on first run but %s on second"
+                    % (existing.status.name, status)
+                )
+        else:
+            node.transition = status
