@@ -1494,3 +1494,7 @@ def test_block_programs_are_adaptive():
 
     assert len(shrinker.shrink_target.buffer) == 1
     assert shrinker.calls <= 60
+
+
+def test_expensive_checks_are_off():
+    assert ConjectureRunner.run_expensive_self_checks is False

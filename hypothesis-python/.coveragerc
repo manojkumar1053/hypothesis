@@ -15,6 +15,7 @@ exclude_lines =
     @abc.abstractmethod
     @abc.abstractproperty
     NotImplementedError
+    if self.run_expensive_self_checks:
     pragma: no cover
     __repr__
     __ne__
