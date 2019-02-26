@@ -173,6 +173,9 @@ class DataTree(object):
         a prefix of any buffer previously added to the tree."""
         assert not self.is_exhausted
 
+        # TODO: Implement efficiently
+        return hbytes()
+
         while True:
             data = ConjectureData.for_random(random, max_length=float("inf"))
             try:
