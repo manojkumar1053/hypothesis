@@ -81,7 +81,12 @@ def test_does_not_generate_positive_if_right_boundary_is_negative(x):
 @pytest.mark.parametrize(
     (u"l", u"r"), [(0.0, 1.0), (-1.0, 0.0), (-sys.float_info.min, sys.float_info.min)]
 )
-@flaky(max_runs=4, min_passes=1)
+@pytest.mark.xfail(
+    reason="""
+This test mostly only ever worked through coincidence.
+These strategies need more work to achieve this goal.
+"""
+)
 def test_can_generate_interval_endpoints(l, r):
     interval = st.floats(l, r)
     minimal(interval, lambda x: x == l, settings=settings(max_examples=10000))
