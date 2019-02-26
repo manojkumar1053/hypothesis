@@ -191,7 +191,7 @@ class DataTree(object):
             status = data.status
         except PreviouslyUnseenBehaviour:
             status = None
-        return (hbytes(data.buffer) + buffer[len(data.buffer):], status)
+        return (hbytes(data.buffer) + buffer[len(data.buffer) :], status)
 
     def simulate_test_function(self, data):
         """Run a simulated version of the test function recorded by
@@ -303,10 +303,14 @@ class TreeRecordingObserver(DataObserver):
         new_transition = conclusion(status, interesting_origin)
 
         if node.transition is not None and node.transition != new_transition:
-            raise Flaky(
-                "Inconsistent test results! Test case was %r on first run but %r on second"
-                % (node.transition, new_transition)
-            )
+            # As an, I'm afraid, horrible bodge, we deliberately ignore flakiness
+            # where tests go from interesting to valid, because it's much easier
+            # to produce good error messages for these further up the stack.
+            if node.transition.status != Status.INTERESTING:
+                raise Flaky(
+                    "Inconsistent test results! Test case was %r on first run but %r on second"
+                    % (node.transition, new_transition)
+                )
         else:
             node.transition = new_transition
 
