@@ -43,7 +43,11 @@ from hypothesis.internal.conjecture.data import (
     Status,
     StopTest,
 )
-from hypothesis.internal.conjecture.datatree import DataTree, PreviouslyUnseenBehaviour, TreeRecordingObserver
+from hypothesis.internal.conjecture.datatree import (
+    DataTree,
+    PreviouslyUnseenBehaviour,
+    TreeRecordingObserver,
+)
 from hypothesis.internal.conjecture.junkdrawer import uniform
 from hypothesis.internal.conjecture.shrinker import Shrinker, sort_key
 from hypothesis.internal.healthcheck import fail_health_check
@@ -84,7 +88,6 @@ class ConjectureRunner(object):
     # If your code is doing weird things while running test, change this
     # to True. Don't forget to change it back to False afterwards!
     run_expensive_self_checks = False
-
 
     def __init__(self, test_function, settings=None, random=None, database_key=None):
         self._test_function = test_function
