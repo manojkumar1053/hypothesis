@@ -191,7 +191,7 @@ class DataTree(object):
             status = data.status
         except PreviouslyUnseenBehaviour:
             status = None
-        return (hbytes(data.buffer), status)
+        return (hbytes(data.buffer) + buffer[len(data.buffer):], status)
 
     def simulate_test_function(self, data):
         """Run a simulated version of the test function recorded by
