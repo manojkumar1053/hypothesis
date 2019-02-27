@@ -20,12 +20,13 @@ from __future__ import absolute_import, division, print_function
 import attr
 
 from hypothesis.errors import Flaky, HypothesisException
-from hypothesis.internal.compat import hbytes, hrange
+from hypothesis.internal.compat import hbytes, hrange, int_to_bytes
 from hypothesis.internal.conjecture.data import (
     ConjectureData,
     DataObserver,
     Status,
     StopTest,
+    bits_to_bytes,
 )
 
 
@@ -173,15 +174,42 @@ class DataTree(object):
         a prefix of any buffer previously added to the tree."""
         assert not self.is_exhausted
 
-        # TODO: Implement efficiently
-        return hbytes()
+        result = bytearray()
+
+        def append_int(n_bits, value):
+            result.extend(int_to_bytes(value, bits_to_bytes(n_bits)))
+
+        current_node = self.root
 
         while True:
-            data = ConjectureData.for_random(random, max_length=float("inf"))
-            try:
-                self.simulate_test_function(data)
-            except PreviouslyUnseenBehaviour:
-                return hbytes(data.buffer)
+            assert not current_node.exhausted
+            for i, (n_bits, value) in enumerate(
+                zip(current_node.bits, current_node.values)
+            ):
+                if i in current_node.forced:
+                    append_int(n_bits, value)
+                    continue
+                while True:
+                    v = random.getrandbits(n_bits)
+                    if v != value:
+                        append_int(n_bits, v)
+                        return hbytes(result)
+            branch = current_node.transition
+            if branch is None:
+                break
+            assert isinstance(branch, Branch)
+            while True:
+                v = random.getrandbits(branch.bits)
+                if v not in branch.children:
+                    append_int(branch.bits, v)
+                    return hbytes(result)
+                child = branch.children[v]
+                if not child.exhausted:
+                    append_int(branch.bits, v)
+                    current_node = child
+                    break
+
+        return hbytes(result)
 
     def rewrite(self, buffer):
         """Use previously seen ConjectureData objects to return a tuple of
